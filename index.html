@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="TaskPulse — A premium project management task tracker for monitoring developer assignments, Jira tickets, and deadlines.">
+  <title>TaskPulse — Project Task Tracker</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-logo">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <rect width="28" height="28" rx="8" fill="url(#logo-grad)"/>
+          <path d="M8 14l4 4 8-8" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <defs><linearGradient id="logo-grad" x1="0" y1="0" x2="28" y2="28"><stop stop-color="#4f7df5"/><stop offset="1" stop-color="#7c5cfc"/></linearGradient></defs>
+        </svg>
+        <span>TaskPulse</span>
+      </div>
+      <nav class="nav-menu">
+        <a class="nav-item active" data-view="dashboard" href="#">
+          <i data-lucide="layout-dashboard"></i>
+          <span>Dashboard</span>
+        </a>
+        <a class="nav-item" data-view="tasks" href="#">
+          <i data-lucide="list-checks"></i>
+          <span>Tasks</span>
+        </a>
+        <a class="nav-item" data-view="developers" href="#">
+          <i data-lucide="users"></i>
+          <span>Developers</span>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-footer-info">
+          <div class="avatar" style="width:36px;height:36px;font-size:0.8rem;">PM</div>
+          <div>
+            <div style="font-size:0.85rem;font-weight:600;">Project Manager</div>
+            <div style="font-size:0.7rem;color:var(--text-muted);">Admin</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- Header -->
+      <header class="header">
+        <div style="display:flex;align-items:center;gap:1rem;">
+          <button class="btn btn-icon mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle menu">
+            <i data-lucide="menu"></i>
+          </button>
+          <div class="search-bar">
+            <i data-lucide="search"></i>
+            <input type="text" class="search-input" id="search-input" placeholder="Search tickets or developers...">
+          </div>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-primary" id="btn-add-task-global">
+            <i data-lucide="plus" style="width:16px;height:16px;"></i>
+            <span>Add Task</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Content Area -->
+      <div class="content-wrapper" id="view-container">
+        <!-- Views are rendered here by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Container -->
+  <div id="modal-container"></div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Developer Profile Side Panel -->
+  <div class="dev-profile" id="dev-profile"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
