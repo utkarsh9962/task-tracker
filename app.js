@@ -1,7 +1,15 @@
 /* ========================================================================
-   TaskPulse — Project Management Task Tracker
-   Light theme · Claude Orange · Full status workflow · Notes/Comments
+   TaskPulse — Project Management Task Tracker with Supabase Backend
    ======================================================================== */
+
+// ─── Supabase Configuration ─────────────────────────────────────────────────
+const SUPABASE_URL = 'https://gmwqcsbrhfsstunvqhst.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdtd3Fjc2JyaGZzc3R1bnZxaHN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUwMzU4NjIsImV4cCI6MjEwMDYxMTg2Mn0.lpULo_-_BU4GCqvgUL--gYkGcCRP30r-lJwoOsNeeVg';
+
+let supabaseClient = null;
+if (typeof supabase !== 'undefined') {
+  supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const STATUSES = [
@@ -28,13 +36,7 @@ const AVATAR_COLORS = [
   '#ec4899', '#06b6d4', '#ef4444', '#14b8a6', '#f43f5e'
 ];
 
-
 // ─── Utility Functions ──────────────────────────────────────────────────────
-const generateId = () =>
-  typeof crypto !== 'undefined' && crypto.randomUUID
-    ? crypto.randomUUID()
-    : Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-
 const formatDate = (dateStr) => {
   if (!dateStr) return '—';
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -51,7 +53,7 @@ const getTimeRemaining = (targetDate) => {
 const isTerminalStatus = (status) => status === 'done' || status === 'closed';
 
 const formatCountdown = (targetDate, status) => {
-  if (isTerminalStatus(status)) return `<span style="color:var(--status-${status === 'done' ? 'done' : 'closed'});">${STATUS_MAP[status].label}</span>`;
+  if (isTerminalStatus(status)) return `<span style="color:var(--status-${status === 'done' ? 'done' : 'closed'});">${STATUS_MAP[status]?.label || status}</span>`;
   const { days, hours, minutes, isOverdue } = getTimeRemaining(targetDate);
   if (isOverdue) return `<span style="color:var(--status-overdue);">${days}d overdue</span>`;
   if (days > 0) return `${days}d ${hours}h`;
@@ -86,96 +88,190 @@ const escapeHtml = (str) => {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 };
 
-
-// ─── State Management ───────────────────────────────────────────────────────
+// ─── Async Supabase State Management ─────────────────────────────────────────
 class AppState {
   constructor() {
-    this.storageKey = 'taskPulseData_v2';
-    this.loadState();
+    this.tasks = [];
+    this.developers = [];
+    this.ticketTypes = ['ZST', 'WP', 'NET', 'MOB', 'CMS'];
+    this.isLoading = true;
+    this.hasError = false;
+    this.errorMessage = '';
   }
 
-  loadState() {
-    const data = localStorage.getItem(this.storageKey);
-    if (data) {
-      try {
-        const p = JSON.parse(data);
-        this.tasks = p.tasks || [];
-        this.developers = p.developers || [];
-        this.ticketTypes = p.ticketTypes || ['ZST', 'WP', 'NET', 'MOB', 'CMS'];
-      } catch (e) {
-        console.error('Failed to parse state', e);
-        this.seedData();
+  async init(onUpdateCallback) {
+    this.onUpdateCallback = onUpdateCallback;
+    await this.fetchAll();
+    this.setupRealtimeSubscriptions();
+  }
+
+  async fetchAll() {
+    this.isLoading = true;
+    this.hasError = false;
+    try {
+      if (!supabaseClient) throw new Error('Supabase client library not loaded.');
+
+      // Fetch Developers
+      const { data: devsData, error: devsErr } = await supabaseClient
+        .from('developers')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (devsErr) throw devsErr;
+      this.developers = devsData || [];
+
+      // Fetch Ticket Types
+      const { data: typesData, error: typesErr } = await supabaseClient
+        .from('ticket_types')
+        .select('*');
+
+      if (typesErr) throw typesErr;
+      if (typesData && typesData.length > 0) {
+        this.ticketTypes = Array.from(new Set(['ZST', 'WP', 'NET', 'MOB', 'CMS', ...typesData.map(t => t.prefix)]));
       }
-    } else {
-      this.seedData();
+
+      // Fetch Tasks
+      const { data: tasksData, error: tasksErr } = await supabaseClient
+        .from('tasks')
+        .select('*')
+        .order('target_date', { ascending: true });
+
+      if (tasksErr) throw tasksErr;
+
+      // Map DB snake_case to app camelCase
+      this.tasks = (tasksData || []).map(t => ({
+        id: t.id,
+        developerId: t.developer_id,
+        ticketType: t.ticket_type,
+        ticketNumber: t.ticket_number,
+        fullTicket: t.full_ticket,
+        description: t.description || '',
+        notes: t.notes || '',
+        assignedDate: t.assigned_date,
+        targetDate: t.target_date,
+        status: t.status
+      }));
+
+    } catch (e) {
+      console.error('Supabase fetch error:', e);
+      this.hasError = true;
+      this.errorMessage = e.message || 'Could not connect to Supabase. Make sure schema.sql has been executed in SQL Editor.';
+    } finally {
+      this.isLoading = false;
     }
   }
 
-  save() {
-    localStorage.setItem(this.storageKey, JSON.stringify({
-      tasks: this.tasks, developers: this.developers, ticketTypes: this.ticketTypes
-    }));
+  setupRealtimeSubscriptions() {
+    if (!supabaseClient) return;
+
+    supabaseClient
+      .channel('schema-db-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, async () => {
+        await this.fetchAll();
+        if (this.onUpdateCallback) this.onUpdateCallback();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'developers' }, async () => {
+        await this.fetchAll();
+        if (this.onUpdateCallback) this.onUpdateCallback();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ticket_types' }, async () => {
+        await this.fetchAll();
+        if (this.onUpdateCallback) this.onUpdateCallback();
+      })
+      .subscribe();
   }
 
-  seedData() {
-    const d1 = generateId(), d2 = generateId(), d3 = generateId();
-    this.developers = [
-      { id: d1, name: 'Anant',  color: '#e8754a' },
-      { id: d2, name: 'Priya',  color: '#8b5cf6' },
-      { id: d3, name: 'Rohan',  color: '#10b981' },
-    ];
-
-    const today = new Date();
-    const ago = (d) => { const t = new Date(today); t.setDate(t.getDate() - d); return t.toISOString(); };
-    const future = (d) => { const t = new Date(today); t.setDate(t.getDate() + d); return t.toISOString(); };
-
-    this.tasks = [
-      { id: generateId(), developerId: d1, ticketType: 'ZST', ticketNumber: '1024', fullTicket: 'ZST-1024',
-        description: 'Fix authentication flow on mobile', notes: 'Discussed with backend team — need to update token refresh logic. Check Slack thread from Jul 20.',
-        assignedDate: ago(7), targetDate: future(7), status: 'inprogress' },
-      { id: generateId(), developerId: d2, ticketType: 'WP', ticketNumber: '2048', fullTicket: 'WP-2048',
-        description: 'Redesign landing page hero section', notes: 'New Figma mockups approved. Use the v3 design.',
-        assignedDate: ago(14), targetDate: ago(1), status: 'testing' },
-      { id: generateId(), developerId: d3, ticketType: 'NET', ticketNumber: '3072', fullTicket: 'NET-3072',
-        description: 'REST API v2 integration', notes: '',
-        assignedDate: ago(14), targetDate: ago(2), status: 'done' },
-      { id: generateId(), developerId: d1, ticketType: 'MOB', ticketNumber: '4096', fullTicket: 'MOB-4096',
-        description: 'Push notification service setup', notes: 'Use Firebase Cloud Messaging. Anant to share APNs certificate.',
-        assignedDate: ago(2), targetDate: future(2), status: 'selected' },
-      { id: generateId(), developerId: d2, ticketType: 'CMS', ticketNumber: '5120', fullTicket: 'CMS-5120',
-        description: 'Content migration pipeline', notes: '',
-        assignedDate: ago(0), targetDate: future(5), status: 'selected' },
-    ];
-
-    this.ticketTypes = ['ZST', 'WP', 'NET', 'MOB', 'CMS'];
-    this.save();
-  }
-
-  // — Getters —
+  // Getters
   getTasks()        { return this.tasks; }
   getDevelopers()   { return this.developers; }
   getTicketTypes()  { return this.ticketTypes; }
   getDeveloper(id)  { return this.developers.find(d => d.id === id); }
 
-  // — Task CRUD —
-  addTask(t)           { this.tasks.push(t); this.save(); }
-  updateTask(id, u)    { const i = this.tasks.findIndex(t => t.id === id); if (i >= 0) { this.tasks[i] = { ...this.tasks[i], ...u }; this.save(); } }
-  deleteTask(id)       { this.tasks = this.tasks.filter(t => t.id !== id); this.save(); }
-  changeStatus(id, s)  { this.updateTask(id, { status: s }); }
-  updateNotes(id, n)   { this.updateTask(id, { notes: n }); }
+  // Task Mutations
+  async addTask(t) {
+    const payload = {
+      developer_id: t.developerId,
+      ticket_type: t.ticketType,
+      ticket_number: t.ticketNumber,
+      full_ticket: t.fullTicket,
+      description: t.description || '',
+      notes: t.notes || '',
+      assigned_date: t.assignedDate,
+      target_date: t.targetDate,
+      status: t.status || 'selected'
+    };
+    const { error } = await supabaseClient.from('tasks').insert([payload]);
+    if (error) throw error;
+    await this.fetchAll();
+  }
 
-  // — Developer CRUD —
-  addDeveloper(d)      { this.developers.push(d); this.save(); }
-  updateDeveloper(id, u) { const i = this.developers.findIndex(d => d.id === id); if (i >= 0) { this.developers[i] = { ...this.developers[i], ...u }; this.save(); } }
-  deleteDeveloper(id)  { this.developers = this.developers.filter(d => d.id !== id); this.tasks = this.tasks.filter(t => t.developerId !== id); this.save(); }
+  async updateTask(id, u) {
+    const payload = {};
+    if (u.developerId !== undefined) payload.developer_id = u.developerId;
+    if (u.ticketType !== undefined) payload.ticket_type = u.ticketType;
+    if (u.ticketNumber !== undefined) payload.ticket_number = u.ticketNumber;
+    if (u.fullTicket !== undefined) payload.full_ticket = u.fullTicket;
+    if (u.description !== undefined) payload.description = u.description;
+    if (u.notes !== undefined) payload.notes = u.notes;
+    if (u.assignedDate !== undefined) payload.assigned_date = u.assignedDate;
+    if (u.targetDate !== undefined) payload.target_date = u.targetDate;
+    if (u.status !== undefined) payload.status = u.status;
+    payload.updated_at = new Date().toISOString();
 
-  // — Ticket Types —
-  addTicketType(t) {
-    const u = t.toUpperCase();
-    if (!this.ticketTypes.includes(u)) { this.ticketTypes.push(u); this.save(); }
+    const { error } = await supabaseClient.from('tasks').update(payload).eq('id', id);
+    if (error) throw error;
+    await this.fetchAll();
+  }
+
+  async deleteTask(id) {
+    const { error } = await supabaseClient.from('tasks').delete().eq('id', id);
+    if (error) throw error;
+    await this.fetchAll();
+  }
+
+  async changeStatus(id, s) {
+    await this.updateTask(id, { status: s });
+  }
+
+  async updateNotes(id, n) {
+    await this.updateTask(id, { notes: n });
+  }
+
+  // Developer Mutations
+  async addDeveloper(d) {
+    const payload = { name: d.name, color: d.color || '#e8754a' };
+    const { data, error } = await supabaseClient.from('developers').insert([payload]).select();
+    if (error) throw error;
+    await this.fetchAll();
+    return data && data[0] ? data[0].id : null;
+  }
+
+  async updateDeveloper(id, u) {
+    const payload = {};
+    if (u.name !== undefined) payload.name = u.name;
+    if (u.color !== undefined) payload.color = u.color;
+
+    const { error } = await supabaseClient.from('developers').update(payload).eq('id', id);
+    if (error) throw error;
+    await this.fetchAll();
+  }
+
+  async deleteDeveloper(id) {
+    const { error } = await supabaseClient.from('developers').delete().eq('id', id);
+    if (error) throw error;
+    await this.fetchAll();
+  }
+
+  // Ticket Types Mutations
+  async addTicketType(prefix) {
+    const u = prefix.toUpperCase();
+    if (!this.ticketTypes.includes(u)) {
+      const { error } = await supabaseClient.from('ticket_types').insert([{ prefix: u }]);
+      if (error && error.code !== '23505') console.error(error); // ignore duplicate unique key
+      await this.fetchAll();
+    }
   }
 }
-
 
 // ─── App Controller ─────────────────────────────────────────────────────────
 class App {
@@ -185,7 +281,7 @@ class App {
     this.searchQuery = '';
     this.filters = { developer: 'all', type: 'all', status: 'all' };
     this.sortBy = 'targetDate';
-    this.expandedNotes = new Set(); // track which task notes are expanded
+    this.expandedNotes = new Set();
 
     this.viewContainer = document.getElementById('view-container');
     this.modalContainer = document.getElementById('modal-container');
@@ -193,6 +289,12 @@ class App {
     this.devProfile = document.getElementById('dev-profile');
 
     this.bindEvents();
+    this.init();
+  }
+
+  async init() {
+    this.render(); // Initial render shows loading spinner
+    await this.state.init(() => this.render());
     this.render();
     this.startCountdown();
   }
@@ -212,7 +314,7 @@ class App {
         return;
       }
 
-      // Add task modal (global + view button)
+      // Add task modal
       if (e.target.closest('#btn-add-task-global') || e.target.closest('#btn-add-task-modal')) {
         this.showAddTaskModal();
         return;
@@ -241,13 +343,17 @@ class App {
         this.showConfirmModal(
           `Delete ${dev?.name || 'developer'}?`,
           taskCount > 0
-            ? `This will also delete <strong>${taskCount} task(s)</strong> assigned to ${dev?.name}. This action cannot be undone.`
-            : `Are you sure you want to remove ${dev?.name} from the team?`,
-          () => {
-            this.state.deleteDeveloper(id);
-            this.closeDevProfile();
-            this.showToast(`${dev?.name} removed`, 'success');
-            this.render();
+            ? `This will also delete <strong>${taskCount} task(s)</strong> assigned to ${dev?.name}.`
+            : `Are you sure you want to remove ${dev?.name}?`,
+          async () => {
+            try {
+              await this.state.deleteDeveloper(id);
+              this.closeDevProfile();
+              this.showToast(`${dev?.name} removed`, 'success');
+              this.render();
+            } catch (err) {
+              this.showToast(err.message, 'error');
+            }
           }
         );
         return;
@@ -256,10 +362,14 @@ class App {
       // Delete task
       if (e.target.closest('.btn-delete-task')) {
         const id = e.target.closest('.btn-delete-task').dataset.id;
-        this.showConfirmModal('Delete task?', 'This action cannot be undone.', () => {
-          this.state.deleteTask(id);
-          this.showToast('Task deleted', 'success');
-          this.render();
+        this.showConfirmModal('Delete task?', 'This action cannot be undone.', async () => {
+          try {
+            await this.state.deleteTask(id);
+            this.showToast('Task deleted', 'success');
+            this.render();
+          } catch (err) {
+            this.showToast(err.message, 'error');
+          }
         });
         return;
       }
@@ -317,12 +427,16 @@ class App {
     });
 
     // Status change
-    document.addEventListener('change', (e) => {
+    document.addEventListener('change', async (e) => {
       if (e.target.closest('.task-status-select')) {
         const id = e.target.closest('.task-status-select').dataset.id;
-        this.state.changeStatus(id, e.target.value);
-        this.showToast('Status updated', 'success');
-        this.render();
+        try {
+          await this.state.changeStatus(id, e.target.value);
+          this.showToast('Status updated', 'success');
+          this.render();
+        } catch (err) {
+          this.showToast(err.message, 'error');
+        }
         return;
       }
 
@@ -410,6 +524,37 @@ class App {
 
   // ─── Main Render ─────────────────────────────────────────────────────
   render() {
+    if (this.state.isLoading) {
+      this.viewContainer.innerHTML = `
+        <div class="loading-overlay">
+          <div class="spinner"></div>
+          <div class="loading-text">Connecting to Supabase...</div>
+        </div>
+      `;
+      return;
+    }
+
+    if (this.state.hasError) {
+      this.viewContainer.innerHTML = `
+        <div class="empty-state">
+          <i data-lucide="database" style="color:var(--status-overdue);opacity:1;"></i>
+          <h3 style="color:var(--status-overdue);">Database Connection Error</h3>
+          <p style="max-width:500px;margin-bottom:1rem;">${escapeHtml(this.state.errorMessage)}</p>
+          <div class="notes-content" style="text-align:left;max-width:550px;">
+            <strong>Setup Checklist:</strong><br>
+            1. Go to your Supabase Project Dashboard → <strong>SQL Editor</strong>.<br>
+            2. Paste and run the SQL script from <code>schema.sql</code>.<br>
+            3. Click Retry below.
+          </div>
+          <button class="btn btn-primary" onclick="app.init()" style="margin-top:1.5rem;">
+            <i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> Retry Connection
+          </button>
+        </div>
+      `;
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+      return;
+    }
+
     switch (this.currentView) {
       case 'dashboard':   this.viewContainer.innerHTML = this.renderDashboard(); break;
       case 'tasks':       this.viewContainer.innerHTML = this.renderTasksView(); break;
@@ -434,7 +579,7 @@ class App {
 
     return `
       <div class="view-header">
-        <div><h1>Dashboard</h1><p class="view-subtitle">Project overview and recent activity</p></div>
+        <div><h1>Dashboard</h1><p class="view-subtitle">Project overview and recent activity (Live via Supabase)</p></div>
       </div>
 
       <div class="dashboard-grid">
@@ -481,7 +626,7 @@ class App {
           <label class="form-label">Developer</label>
           <select class="form-control custom-dropdown" id="filter-dev">
             <option value="all">All</option>
-            ${devs.map(d => `<option value="${d.id}" ${this.filters.developer === d.id ? 'selected' : ''}>${d.name}</option>`).join('')}
+            ${devs.map(d => `<option value="${d.id}" ${this.filters.developer === d.id ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('')}
           </select>
         </div>
         <div class="filter-group">
@@ -543,7 +688,7 @@ class App {
                 <td>
                   <div style="display:flex;align-items:center;gap:0.4rem;">
                     <div class="avatar" style="width:26px;height:26px;font-size:0.6rem;background:${dev?.color || '#999'};">${getInitials(dev?.name)}</div>
-                    <span style="font-size:0.82rem;">${dev?.name || 'Unknown'}</span>
+                    <span style="font-size:0.82rem;">${escapeHtml(dev?.name) || 'Unassigned'}</span>
                   </div>
                 </td>
                 <td>
@@ -884,72 +1029,87 @@ class App {
   }
 
   // ─── Form Handlers ───────────────────────────────────────────────────
-  handleAddTask(form) {
+  async handleAddTask(form) {
     const fd = new FormData(form);
     let devId = fd.get('developerId');
-    if (devId === 'add-new') {
-      const n = fd.get('newDeveloperName')?.trim();
-      if (!n) return this.showToast('Enter a developer name', 'error');
-      devId = generateId();
-      this.state.addDeveloper({ id: devId, name: n, color: getRandomColor() });
-    }
-    if (!devId) return this.showToast('Select a developer', 'error');
+    try {
+      if (devId === 'add-new') {
+        const n = fd.get('newDeveloperName')?.trim();
+        if (!n) return this.showToast('Enter a developer name', 'error');
+        devId = await this.state.addDeveloper({ name: n, color: getRandomColor() });
+      }
+      if (!devId) return this.showToast('Select a developer', 'error');
 
-    let type = fd.get('ticketType');
-    if (type === 'add-more') {
-      type = fd.get('newTicketType')?.trim().toUpperCase();
-      if (!type) return this.showToast('Enter a ticket prefix', 'error');
-      this.state.addTicketType(type);
-    }
-    const num = fd.get('ticketNumber')?.trim();
-    if (!num) return this.showToast('Enter a ticket number', 'error');
-    const target = fd.get('targetDate');
-    if (!target) return this.showToast('Select a target date', 'error');
+      let type = fd.get('ticketType');
+      if (type === 'add-more') {
+        type = fd.get('newTicketType')?.trim().toUpperCase();
+        if (!type) return this.showToast('Enter a ticket prefix', 'error');
+        await this.state.addTicketType(type);
+      }
+      const num = fd.get('ticketNumber')?.trim();
+      if (!num) return this.showToast('Enter a ticket number', 'error');
+      const target = fd.get('targetDate');
+      if (!target) return this.showToast('Select a target date', 'error');
 
-    this.state.addTask({
-      id: generateId(), developerId: devId, ticketType: type, ticketNumber: num,
-      fullTicket: `${type}-${num}`, description: fd.get('description')?.trim() || '',
-      notes: fd.get('notes')?.trim() || '',
-      assignedDate: new Date(fd.get('assignedDate') || new Date()).toISOString(),
-      targetDate: new Date(target).toISOString(),
-      status: fd.get('status') || 'selected'
-    });
-    this.closeModal();
-    this.showToast(`Task ${type}-${num} added!`, 'success');
-    this.render();
+      await this.state.addTask({
+        developerId: devId, ticketType: type, ticketNumber: num,
+        fullTicket: `${type}-${num}`, description: fd.get('description')?.trim() || '',
+        notes: fd.get('notes')?.trim() || '',
+        assignedDate: new Date(fd.get('assignedDate') || new Date()).toISOString(),
+        targetDate: new Date(target).toISOString(),
+        status: fd.get('status') || 'selected'
+      });
+      this.closeModal();
+      this.showToast(`Task ${type}-${num} added!`, 'success');
+      this.render();
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
   }
 
-  handleAddDev(form) {
+  async handleAddDev(form) {
     const name = new FormData(form).get('name')?.trim();
     if (!name) return this.showToast('Enter a name', 'error');
-    this.state.addDeveloper({ id: generateId(), name, color: getRandomColor() });
-    this.closeModal();
-    this.showToast(`${name} added to team!`, 'success');
-    this.render();
+    try {
+      await this.state.addDeveloper({ name, color: getRandomColor() });
+      this.closeModal();
+      this.showToast(`${name} added to team!`, 'success');
+      this.render();
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
   }
 
-  handleEditDev(form) {
+  async handleEditDev(form) {
     const fd = new FormData(form);
     const id = fd.get('devId');
     const name = fd.get('name')?.trim();
     if (!name) return this.showToast('Name is required', 'error');
     const color = fd.get('color') || getRandomColor();
-    this.state.updateDeveloper(id, { name, color });
-    this.closeModal();
-    this.closeDevProfile();
-    this.showToast(`${name} updated`, 'success');
-    this.render();
+    try {
+      await this.state.updateDeveloper(id, { name, color });
+      this.closeModal();
+      this.closeDevProfile();
+      this.showToast(`${name} updated`, 'success');
+      this.render();
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
   }
 
-  handleEditNotes(form) {
+  async handleEditNotes(form) {
     const fd = new FormData(form);
     const id = fd.get('taskId');
     const notes = fd.get('notes')?.trim() || '';
-    this.state.updateNotes(id, notes);
-    this.expandedNotes.add(id);
-    this.closeModal();
-    this.showToast('Notes saved', 'success');
-    this.render();
+    try {
+      await this.state.updateNotes(id, notes);
+      this.expandedNotes.add(id);
+      this.closeModal();
+      this.showToast('Notes saved', 'success');
+      this.render();
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
   }
 
   // ─── Modal Helpers ───────────────────────────────────────────────────
@@ -970,7 +1130,7 @@ class App {
     toast.className = `toast ${type}`;
     toast.innerHTML = `
       <div class="toast-icon"><i data-lucide="${icons[type] || 'info'}"></i></div>
-      <div class="toast-content"><h5>${type.charAt(0).toUpperCase() + type.slice(1)}</h5><p>${message}</p></div>
+      <div class="toast-content"><h5>${type.charAt(0).toUpperCase() + type.slice(1)}</h5><p>${escapeHtml(message)}</p></div>
     `;
     this.toastContainer.appendChild(toast);
     if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -982,7 +1142,6 @@ class App {
     }, 3000);
   }
 }
-
 
 // ─── Initialize ─────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => { window.app = new App(); });

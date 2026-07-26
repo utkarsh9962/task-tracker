@@ -958,6 +958,31 @@ textarea.form-control {
   font-size: 0.75rem;
 }
 
+/* ─── Loading Spinner ─────────────────────────────────────────────────── */
+.loading-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  flex-direction: column;
+  gap: 1rem;
+}
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--border-light);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.loading-text {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
 /* ─── Empty States ────────────────────────────────────────────────────── */
 .empty-state {
   display: flex;
