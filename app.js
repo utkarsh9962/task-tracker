@@ -1,5 +1,5 @@
 /* ========================================================================
-   TaskPulse — Project Management Task Tracker with Supabase Backend
+   Task Tracker — Project Management Task Tracker with Supabase Backend
    ======================================================================== */
 
 // ─── Supabase Configuration ─────────────────────────────────────────────────
@@ -86,6 +86,25 @@ const getTicketColor = (type) => {
 const escapeHtml = (str) => {
   if (!str) return '';
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+};
+
+// ─── Fuzzy Multi-field Token Search ──────────────────────────────────────────
+const matchFuzzyTask = (task, query, devName) => {
+  if (!query) return true;
+  const q = query.toLowerCase().trim();
+  const tokens = q.split(/\s+/).filter(Boolean);
+
+  const searchableText = [
+    task.fullTicket,
+    task.ticketNumber,
+    task.ticketType,
+    task.description || '',
+    task.notes || '',
+    devName || '',
+    STATUS_MAP[task.status]?.label || ''
+  ].join(' ').toLowerCase();
+
+  return tokens.every(token => searchableText.includes(token));
 };
 
 // ─── Async Supabase State Management ─────────────────────────────────────────
@@ -299,6 +318,16 @@ class App {
     this.startCountdown();
   }
 
+  switchView(viewName) {
+    this.currentView = viewName;
+    document.querySelectorAll('.nav-item').forEach(el => {
+      if (el.dataset.view === viewName) el.classList.add('active');
+      else el.classList.remove('active');
+    });
+    this.closeDevProfile();
+    this.render();
+  }
+
   // ─── Event Binding ───────────────────────────────────────────────────
   bindEvents() {
     document.addEventListener('click', (e) => {
@@ -306,11 +335,39 @@ class App {
       const navItem = e.target.closest('.nav-item');
       if (navItem) {
         e.preventDefault();
-        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-        navItem.classList.add('active');
-        this.currentView = navItem.dataset.view;
-        this.closeDevProfile();
-        this.render();
+        this.switchView(navItem.dataset.view);
+        return;
+      }
+
+      // Sidebar Collapse Toggle
+      if (e.target.closest('#sidebar-toggle-btn')) {
+        const sidebar = document.getElementById('sidebar');
+        const container = document.getElementById('app-container');
+        sidebar.classList.toggle('collapsed');
+        container.classList.toggle('sidebar-collapsed');
+        const isCollapsed = sidebar.classList.contains('collapsed');
+        const btn = document.getElementById('sidebar-toggle-btn');
+        if (btn) btn.innerHTML = `<i data-lucide="${isCollapsed ? 'chevron-right' : 'chevron-left'}"></i>`;
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+        return;
+      }
+
+      // Dashboard Stat Card Shortcuts
+      const statCard = e.target.closest('.stat-card[data-stat]');
+      if (statCard) {
+        const stat = statCard.dataset.stat;
+        if (stat === 'devs') {
+          this.switchView('developers');
+        } else if (stat === 'active') {
+          this.filters.status = 'all';
+          this.switchView('tasks');
+        } else if (stat === 'overdue') {
+          this.filters.status = 'overdue';
+          this.switchView('tasks');
+        } else if (stat === 'done') {
+          this.filters.status = 'done';
+          this.switchView('tasks');
+        }
         return;
       }
 
@@ -464,12 +521,17 @@ class App {
       }
     });
 
-    // Search
+    // Search input (Real-time fuzzy search)
     const searchInput = document.getElementById('search-input');
     if (searchInput) {
       searchInput.addEventListener('input', (e) => {
         this.searchQuery = e.target.value.toLowerCase().trim();
-        this.render();
+        // If user is searching and currently on dashboard, automatically switch to tasks view to show matching tasks
+        if (this.searchQuery && this.currentView === 'dashboard') {
+          this.switchView('tasks');
+        } else {
+          this.render();
+        }
       });
     }
 
@@ -494,16 +556,16 @@ class App {
     }, 60000);
   }
 
-  // ─── Filtering ───────────────────────────────────────────────────────
+  // ─── Filtering & Fuzzy Search ────────────────────────────────────────
   getFilteredTasks() {
     let tasks = [...this.state.getTasks()];
 
+    // Apply Fuzzy Search across all fields
     if (this.searchQuery) {
-      tasks = tasks.filter(t =>
-        t.fullTicket.toLowerCase().includes(this.searchQuery) ||
-        (t.description || '').toLowerCase().includes(this.searchQuery) ||
-        (this.state.getDeveloper(t.developerId)?.name || '').toLowerCase().includes(this.searchQuery)
-      );
+      tasks = tasks.filter(t => {
+        const devName = this.state.getDeveloper(t.developerId)?.name || '';
+        return matchFuzzyTask(t, this.searchQuery, devName);
+      });
     }
 
     if (this.currentView === 'tasks') {
@@ -594,23 +656,23 @@ class App {
 
     return `
       <div class="view-header">
-        <div><h1>Dashboard</h1><p class="view-subtitle">Project overview and recent activity (Live via Supabase)</p></div>
+        <div><h1>Dashboard</h1><p class="view-subtitle">Project overview and recent activity</p></div>
       </div>
 
       <div class="dashboard-grid">
-        <div class="stat-card stagger-1">
+        <div class="stat-card stagger-1" data-stat="active" title="Click to view all tasks">
           <div class="stat-icon orange"><i data-lucide="clipboard-list"></i></div>
           <div class="stat-info"><h3>Active Tasks</h3><div class="stat-value">${active.length}</div></div>
         </div>
-        <div class="stat-card stagger-2">
+        <div class="stat-card stagger-2" data-stat="devs" title="Click to view all developers">
           <div class="stat-icon blue"><i data-lucide="users"></i></div>
           <div class="stat-info"><h3>Developers</h3><div class="stat-value">${devCount}</div></div>
         </div>
-        <div class="stat-card stagger-3" ${overdue > 0 ? 'style="border-color:rgba(239,68,68,0.35);"' : ''}>
+        <div class="stat-card stagger-3" data-stat="overdue" title="Click to view overdue tasks" ${overdue > 0 ? 'style="border-color:rgba(239,68,68,0.35);"' : ''}>
           <div class="stat-icon red"><i data-lucide="alert-triangle"></i></div>
           <div class="stat-info"><h3>Overdue</h3><div class="stat-value" ${overdue > 0 ? 'style="color:var(--status-overdue);"' : ''}>${overdue}</div></div>
         </div>
-        <div class="stat-card stagger-4">
+        <div class="stat-card stagger-4" data-stat="done" title="Click to view completed tasks">
           <div class="stat-icon green"><i data-lucide="check-circle-2"></i></div>
           <div class="stat-info"><h3>Done This Month</h3><div class="stat-value">${closedThisMonth}</div></div>
         </div>
@@ -618,7 +680,7 @@ class App {
 
       <div class="section-header">
         <h2>Recent Tasks</h2>
-        <a href="#" class="nav-link" onclick="document.querySelector('[data-view=tasks]').click();return false;">View All →</a>
+        <a href="#" class="nav-link" onclick="window.app.switchView('tasks');return false;">View All →</a>
       </div>
       <div class="table-container">${this.renderTaskTable(recent, false)}</div>
     `;
@@ -764,7 +826,15 @@ class App {
   // ─── Developers View ─────────────────────────────────────────────────
   renderDevsView() {
     let devs = this.state.getDevelopers();
-    if (this.searchQuery) devs = devs.filter(d => d.name.toLowerCase().includes(this.searchQuery));
+    if (this.searchQuery) {
+      devs = devs.filter(d => {
+        const q = this.searchQuery.toLowerCase();
+        const devMatch = d.name.toLowerCase().includes(q);
+        const devTasks = this.state.getTasks().filter(t => t.developerId === d.id);
+        const taskMatch = devTasks.some(t => matchFuzzyTask(t, q, d.name));
+        return devMatch || taskMatch;
+      });
+    }
 
     return `
       <div class="view-header">
@@ -803,7 +873,7 @@ class App {
             </div>
           `;
         }).join('')}
-        ${!devs.length ? '<div class="empty-state" style="grid-column:1/-1;"><i data-lucide="users"></i><h3>No developers</h3><p>Add a developer to get started.</p></div>' : ''}
+        ${!devs.length ? '<div class="empty-state" style="grid-column:1/-1;"><i data-lucide="users"></i><h3>No developers found</h3><p>Try a different search term or add a developer.</p></div>' : ''}
       </div>
     `;
   }

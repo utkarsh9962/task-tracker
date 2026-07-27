@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="TaskPulse — A premium project management task tracker for monitoring developer assignments, Jira tickets, and deadlines.">
-  <title>TaskPulse — Project Task Tracker</title>
+  <meta name="description" content="Task Tracker — A project management task tracker for monitoring developer assignments, Jira tickets, and deadlines.">
+  <title>Task Tracker</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,16 +12,19 @@
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
-  <div class="app-container">
+  <div class="app-container" id="app-container">
     <!-- Sidebar Navigation -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-logo">
         <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
           <rect width="28" height="28" rx="8" fill="url(#logo-grad)"/>
           <path d="M8 14l4 4 8-8" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-          <defs><linearGradient id="logo-grad" x1="0" y1="0" x2="28" y2="28"><stop stop-color="#4f7df5"/><stop offset="1" stop-color="#7c5cfc"/></linearGradient></defs>
+          <defs><linearGradient id="logo-grad" x1="0" y1="0" x2="28" y2="28"><stop stop-color="#e8754a"/><stop offset="1" stop-color="#d97706"/></linearGradient></defs>
         </svg>
-        <span>TaskPulse</span>
+        <span>Task Tracker</span>
+        <button class="sidebar-toggle-btn" id="sidebar-toggle-btn" title="Toggle Sidebar">
+          <i data-lucide="chevron-left"></i>
+        </button>
       </div>
       <nav class="nav-menu">
         <a class="nav-item active" data-view="dashboard" href="#">
@@ -39,7 +42,7 @@
       </nav>
       <div class="sidebar-footer">
         <div class="sidebar-footer-info">
-          <div class="avatar" style="width:36px;height:36px;font-size:0.8rem;">PM</div>
+          <div class="avatar" style="width:36px;height:36px;font-size:0.8rem;background:var(--accent-primary);">PM</div>
           <div>
             <div style="font-size:0.85rem;font-weight:600;">Project Manager</div>
             <div style="font-size:0.7rem;color:var(--text-muted);">Admin</div>
@@ -58,7 +61,7 @@
           </button>
           <div class="search-bar">
             <i data-lucide="search"></i>
-            <input type="text" class="search-input" id="search-input" placeholder="Search tickets or developers...">
+            <input type="text" class="search-input" id="search-input" placeholder="Search ticket #, developer, notes, keyword...">
           </div>
         </div>
         <div class="header-actions">
