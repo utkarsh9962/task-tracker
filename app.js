@@ -359,6 +359,13 @@ class App {
         return;
       }
 
+      // Edit task
+      if (e.target.closest('.btn-edit-task')) {
+        const id = e.target.closest('.btn-edit-task').dataset.id;
+        this.showEditTaskModal(id);
+        return;
+      }
+
       // Delete task
       if (e.target.closest('.btn-delete-task')) {
         const id = e.target.closest('.btn-delete-task').dataset.id;
@@ -469,6 +476,7 @@ class App {
     // Form submits
     document.addEventListener('submit', (e) => {
       if (e.target.id === 'add-task-form')   { e.preventDefault(); this.handleAddTask(e.target); }
+      if (e.target.id === 'edit-task-form')  { e.preventDefault(); this.handleEditTask(e.target); }
       if (e.target.id === 'add-dev-form')    { e.preventDefault(); this.handleAddDev(e.target); }
       if (e.target.id === 'edit-dev-form')   { e.preventDefault(); this.handleEditDev(e.target); }
       if (e.target.id === 'edit-notes-form') { e.preventDefault(); this.handleEditNotes(e.target); }
@@ -511,6 +519,13 @@ class App {
     }
 
     tasks.sort((a, b) => {
+      if (this.sortBy === 'timeLeft') {
+        const aTerminal = isTerminalStatus(a.status);
+        const bTerminal = isTerminalStatus(b.status);
+        if (aTerminal && !bTerminal) return 1;
+        if (!aTerminal && bTerminal) return -1;
+        return getTimeRemaining(a.targetDate).total - getTimeRemaining(b.targetDate).total;
+      }
       if (this.sortBy === 'targetDate') return new Date(a.targetDate) - new Date(b.targetDate);
       if (this.sortBy === 'assignedDate') return new Date(b.assignedDate) - new Date(a.assignedDate);
       if (this.sortBy === 'status') {
@@ -648,6 +663,7 @@ class App {
           <label class="form-label">Sort</label>
           <select class="form-control custom-dropdown" id="sort-tasks">
             <option value="targetDate" ${this.sortBy === 'targetDate' ? 'selected' : ''}>Deadline</option>
+            <option value="timeLeft" ${this.sortBy === 'timeLeft' ? 'selected' : ''}>Time Left</option>
             <option value="assignedDate" ${this.sortBy === 'assignedDate' ? 'selected' : ''}>Assigned</option>
             <option value="status" ${this.sortBy === 'status' ? 'selected' : ''}>Status</option>
           </select>
@@ -728,6 +744,9 @@ class App {
                 ${showActions ? `
                   <td class="text-right">
                     <div style="display:flex;gap:0.25rem;justify-content:flex-end;">
+                      <button class="btn btn-icon btn-edit-task" data-id="${t.id}" title="Edit task">
+                        <i data-lucide="pencil" style="width:14px;height:14px;color:var(--accent-primary);"></i>
+                      </button>
                       <button class="btn btn-icon btn-delete-task" data-id="${t.id}" title="Delete task">
                         <i data-lucide="trash-2" style="width:14px;height:14px;color:var(--status-overdue);"></i>
                       </button>
@@ -919,6 +938,90 @@ class App {
     if (typeof lucide !== 'undefined') lucide.createIcons();
   }
 
+  // ─── Edit Task Modal ──────────────────────────────────────────────────
+  showEditTaskModal(taskId) {
+    const task = this.state.getTasks().find(t => t.id === taskId);
+    if (!task) return;
+
+    const devs = this.state.getDevelopers();
+    const types = this.state.getTicketTypes();
+    const assignedStr = task.assignedDate ? task.assignedDate.split('T')[0] : '';
+    const targetStr = task.targetDate ? task.targetDate.split('T')[0] : '';
+
+    this.modalContainer.innerHTML = `
+      <div class="modal-overlay active">
+        <div class="modal">
+          <div class="modal-header">
+            <h2>Edit Task — ${escapeHtml(task.fullTicket)}</h2>
+            <button class="modal-close"><i data-lucide="x"></i></button>
+          </div>
+          <form id="edit-task-form">
+            <input type="hidden" name="taskId" value="${task.id}">
+            <div class="modal-body">
+              <div class="form-group">
+                <label class="form-label">Developer *</label>
+                <select class="form-control custom-dropdown" name="developerId" id="task-dev-select" required>
+                  ${devs.map(d => `<option value="${d.id}" ${task.developerId === d.id ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('')}
+                  <option value="add-new">＋ Add New Developer</option>
+                </select>
+              </div>
+              <div class="form-group" id="new-dev-input-group" style="display:none;">
+                <label class="form-label">New Developer Name *</label>
+                <input type="text" class="form-control" name="newDeveloperName" placeholder="Full name">
+              </div>
+              <div style="display:flex;gap:0.75rem;">
+                <div class="form-group" style="flex:1;">
+                  <label class="form-label">Ticket Type *</label>
+                  <select class="form-control custom-dropdown" name="ticketType" id="task-type-select" required>
+                    ${types.map(t => `<option value="${t}" ${task.ticketType === t ? 'selected' : ''}>${t}</option>`).join('')}
+                    <option value="add-more">＋ Add More</option>
+                  </select>
+                </div>
+                <div class="form-group" style="flex:1;">
+                  <label class="form-label">Ticket Number *</label>
+                  <input type="text" class="form-control" name="ticketNumber" value="${escapeHtml(task.ticketNumber)}" required>
+                </div>
+              </div>
+              <div class="form-group" id="new-type-input-group" style="display:none;">
+                <label class="form-label">New Ticket Prefix *</label>
+                <input type="text" class="form-control" name="newTicketType" placeholder="e.g. TST" style="text-transform:uppercase;" maxlength="5">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Description</label>
+                <textarea class="form-control" name="description" rows="2" placeholder="Brief task description">${escapeHtml(task.description || '')}</textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Notes / Meeting Comments</label>
+                <textarea class="form-control" name="notes" rows="2" placeholder="Notes from standup, meeting decisions, etc.">${escapeHtml(task.notes || '')}</textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Status</label>
+                <select class="form-control custom-dropdown" name="status">
+                  ${STATUSES.map(s => `<option value="${s.key}" ${task.status === s.key ? 'selected' : ''}>${s.label}</option>`).join('')}
+                </select>
+              </div>
+              <div style="display:flex;gap:0.75rem;">
+                <div class="form-group" style="flex:1;">
+                  <label class="form-label">Assigned Date</label>
+                  <input type="date" class="form-control" name="assignedDate" value="${assignedStr}">
+                </div>
+                <div class="form-group" style="flex:1;">
+                  <label class="form-label">Target Date / Deadline *</label>
+                  <input type="date" class="form-control" name="targetDate" value="${targetStr}" required>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary modal-close">Cancel</button>
+              <button type="submit" class="btn btn-primary"><i data-lucide="save" style="width:14px;height:14px;"></i> Save Changes</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }
+
   // ─── Add Developer Modal ─────────────────────────────────────────────
   showAddDevModal() {
     this.modalContainer.innerHTML = `
@@ -1061,6 +1164,52 @@ class App {
       });
       this.closeModal();
       this.showToast(`Task ${type}-${num} added!`, 'success');
+      this.render();
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
+  }
+
+  async handleEditTask(form) {
+    const fd = new FormData(form);
+    const taskId = fd.get('taskId');
+    let devId = fd.get('developerId');
+
+    try {
+      if (devId === 'add-new') {
+        const n = fd.get('newDeveloperName')?.trim();
+        if (!n) return this.showToast('Enter a developer name', 'error');
+        devId = await this.state.addDeveloper({ name: n, color: getRandomColor() });
+      }
+      if (!devId) return this.showToast('Select a developer', 'error');
+
+      let type = fd.get('ticketType');
+      if (type === 'add-more') {
+        type = fd.get('newTicketType')?.trim().toUpperCase();
+        if (!type) return this.showToast('Enter a ticket prefix', 'error');
+        await this.state.addTicketType(type);
+      }
+
+      const num = fd.get('ticketNumber')?.trim();
+      if (!num) return this.showToast('Enter a ticket number', 'error');
+      const target = fd.get('targetDate');
+      if (!target) return this.showToast('Select a target date', 'error');
+
+      const updates = {
+        developerId: devId,
+        ticketType: type,
+        ticketNumber: num,
+        fullTicket: `${type}-${num}`,
+        description: fd.get('description')?.trim() || '',
+        notes: fd.get('notes')?.trim() || '',
+        status: fd.get('status'),
+        assignedDate: new Date(fd.get('assignedDate') || new Date()).toISOString(),
+        targetDate: new Date(target).toISOString()
+      };
+
+      await this.state.updateTask(taskId, updates);
+      this.closeModal();
+      this.showToast(`Task ${type}-${num} updated!`, 'success');
       this.render();
     } catch (err) {
       this.showToast(err.message, 'error');
